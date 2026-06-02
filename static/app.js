@@ -18,6 +18,23 @@ function isNonUtf8(file) {
   return !["utf-8", "utf-8-sig"].includes(file.encoding);
 }
 
+function isTargetDifferent(file) {
+  const toEncoding = el("toEncoding").value;
+  if (toEncoding === "utf-8") return file.encoding !== "utf-8";
+  if (toEncoding === "utf-8-sig") return file.encoding !== "utf-8-sig";
+  return file.encoding !== toEncoding;
+}
+
+function getFromEncoding() {
+  const selected = el("fromEncoding").value;
+  if (selected !== "custom") return selected;
+  return el("customFromEncoding").value.trim();
+}
+
+function canSelectFile(file) {
+  return isTargetDifferent(file);
+}
+
 function matchesFilter(file) {
   switch (state.filter) {
     case "big5":
@@ -29,7 +46,7 @@ function matchesFilter(file) {
     case "low-confidence":
       return file.confidence === "low";
     case "convertible":
-      return file.selectable;
+      return canSelectFile(file);
     default:
       return true;
   }
@@ -47,15 +64,29 @@ async function postJson(url, payload) {
 }
 
 function renderStats(counts = {}) {
-  const entries = [
+  const labels = new Map([
     ["utf-8", "UTF-8"],
-    ["utf-8-sig", "UTF-8 BOM"],
+    ["utf-8-sig", "UTF-8 with BOM"],
     ["cp950", "CP950 / Big5"],
     ["utf-16-le", "UTF-16 LE"],
     ["utf-16-be", "UTF-16 BE"],
+    ["utf-32-le", "UTF-32 LE"],
+    ["utf-32-be", "UTF-32 BE"],
+    ["gb18030", "GB18030"],
+    ["gbk", "GBK"],
+    ["shift_jis", "Shift_JIS"],
+    ["cp932", "CP932"],
+    ["euc_jp", "EUC-JP"],
+    ["euc_kr", "EUC-KR"],
+    ["cp1252", "Windows-1252"],
+    ["latin_1", "Latin-1"],
     ["unknown", "Unknown"],
     ["binary", "Binary"],
-  ];
+  ]);
+  const entries = [...labels.entries()];
+  for (const key of Object.keys(counts)) {
+    if (!labels.has(key)) entries.push([key, key]);
+  }
   el("stats").innerHTML = entries
     .map(([key, label]) => `<div class="stat"><strong>${counts[key] || 0}</strong><span>${label}</span></div>`)
     .join("");
@@ -70,9 +101,10 @@ function renderRows() {
   el("fileRows").innerHTML = rows
     .map((file, index) => {
       const id = state.files.indexOf(file);
+      const canSelect = canSelectFile(file);
       return `
         <tr>
-          <td><input class="file-check" type="checkbox" data-id="${id}" ${file.selected ? "checked" : ""} ${file.selectable ? "" : "disabled"} /></td>
+          <td><input class="file-check" type="checkbox" data-id="${id}" ${file.selected ? "checked" : ""} ${canSelect ? "" : "disabled"} /></td>
           <td class="path" title="${file.path}">${file.relative_path}</td>
           <td><span class="tag">${file.encoding}</span></td>
           <td>${file.confidence}</td>
@@ -137,7 +169,7 @@ async function scan() {
     state.root = data.root;
     state.files = data.files.map((file) => ({
       ...file,
-      selected: file.encoding === "cp950" && file.confidence !== "low",
+      selected: canSelectFile(file),
     }));
     renderStats(data.counts);
     renderRows();
@@ -154,12 +186,17 @@ async function scan() {
 async function preview(index) {
   const file = state.files[index];
   if (!file) return;
+  const fromEncoding = getFromEncoding();
+  if (!fromEncoding) {
+    el("previewText").textContent = "請輸入自訂來源編碼。";
+    return;
+  }
   el("previewMeta").textContent = file.relative_path;
   el("previewText").textContent = "讀取預覽中...";
   try {
     const data = await postJson("/api/preview", {
       path: file.path,
-      fromEncoding: el("fromEncoding").value,
+      fromEncoding,
       toEncoding: el("toEncoding").value,
     });
     el("previewText").textContent = [
@@ -180,13 +217,26 @@ async function preview(index) {
 }
 
 async function convertSelected() {
+  const fromEncoding = getFromEncoding();
+  if (!fromEncoding) {
+    log("請輸入自訂來源編碼。");
+    return;
+  }
   const selected = state.files.filter((file) => file.selected);
   if (!selected.length) {
     log("沒有勾選檔案。");
     return;
   }
+  if (fromEncoding === "auto" && selected.some((file) => ["binary", "unknown"].includes(file.encoding))) {
+    log("有檔案無法自動判斷來源編碼。請把來源編碼改成 UTF-16 LE 或正確的編碼後再轉換。");
+    return;
+  }
   const mode = el("convertMode").value;
-  const summary = `即將轉換 ${selected.length} 個檔案\n模式：${mode}\n目標：${el("toEncoding").value}`;
+  const modeText =
+    mode === "in-place"
+      ? `原地轉換並備份\n備份目錄：${el("backupRoot").value}`
+      : `輸出到新目錄，原始檔不會變\n輸出目錄：${el("outputRoot").value}`;
+  const summary = `即將轉換 ${selected.length} 個檔案\n來源：${fromEncoding}\n目標：${el("toEncoding").value}\n模式：${modeText}`;
   if (!confirm(summary)) return;
 
   el("convertButton").disabled = true;
@@ -195,7 +245,7 @@ async function convertSelected() {
     const data = await postJson("/api/convert", {
       root: state.root,
       files: selected.map((file) => file.path),
-      fromEncoding: el("fromEncoding").value,
+      fromEncoding,
       toEncoding: el("toEncoding").value,
       mode,
       outputRoot: el("outputRoot").value,
@@ -204,6 +254,7 @@ async function convertSelected() {
     log(
       [
         `轉換完成：成功 ${data.success}，失敗 ${data.failed}`,
+        mode === "in-place" ? "原始檔已更新；備份已建立。" : "原始檔未修改；請到輸出目錄查看轉換後檔案。",
         `Manifest: ${data.manifestPath}`,
         "",
         ...data.results.map((item) =>
@@ -253,7 +304,24 @@ el("fileRows").addEventListener("change", (event) => {
 el("selectAll").addEventListener("change", (event) => {
   const checked = event.target.checked;
   state.files.filter(matchesFilter).forEach((file) => {
-    if (file.selectable) file.selected = checked;
+    if (canSelectFile(file)) file.selected = checked;
+  });
+  renderRows();
+});
+
+function refreshSourceEncodingControls() {
+  el("customFromEncodingLabel").hidden = el("fromEncoding").value !== "custom";
+  state.files.forEach((file) => {
+    if (!canSelectFile(file)) file.selected = false;
+  });
+  renderRows();
+}
+
+el("fromEncoding").addEventListener("change", refreshSourceEncodingControls);
+el("customFromEncoding").addEventListener("input", refreshSourceEncodingControls);
+el("toEncoding").addEventListener("change", () => {
+  state.files.forEach((file) => {
+    file.selected = canSelectFile(file);
   });
   renderRows();
 });

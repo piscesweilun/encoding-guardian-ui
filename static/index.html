@@ -55,21 +55,38 @@
               <option value="auto">自動</option>
               <option value="cp950">CP950 / Big5</option>
               <option value="utf-8">UTF-8</option>
+              <option value="utf-16-le">UTF-16 LE</option>
+              <option value="utf-16-be">UTF-16 BE</option>
+              <option value="utf-32-le">UTF-32 LE</option>
+              <option value="utf-32-be">UTF-32 BE</option>
+              <option value="gb18030">GB18030</option>
+              <option value="gbk">GBK</option>
+              <option value="shift_jis">Shift_JIS</option>
+              <option value="cp932">CP932</option>
+              <option value="euc_jp">EUC-JP</option>
+              <option value="euc_kr">EUC-KR</option>
+              <option value="cp1252">Windows-1252</option>
+              <option value="latin_1">Latin-1</option>
+              <option value="custom">自訂</option>
             </select>
+          </label>
+          <label id="customFromEncodingLabel" hidden>
+            自訂來源編碼
+            <input id="customFromEncoding" placeholder="例如 cp1251, iso-8859-2, koi8-r" />
           </label>
           <label>
             目標編碼
             <select id="toEncoding">
               <option value="utf-8">UTF-8</option>
-              <option value="utf-8-sig">UTF-8 BOM</option>
+              <option value="utf-8-sig">UTF-8 with BOM</option>
               <option value="cp950">CP950 / Big5</option>
             </select>
           </label>
           <label>
             模式
             <select id="convertMode">
-              <option value="out">輸出到新目錄</option>
               <option value="in-place">原地轉換並備份</option>
+              <option value="out">輸出到新目錄</option>
             </select>
           </label>
           <label>

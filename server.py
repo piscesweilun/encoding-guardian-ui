@@ -75,6 +75,22 @@ DEFAULT_EXCLUDES = {
     "vendor",
 }
 
+UTF8_ENCODINGS = {"utf-8", "utf-8-sig"}
+NON_CONVERTIBLE_ENCODINGS = {"binary", "unknown"}
+UTF_ENCODINGS_WITH_BOM_CHAR = {"utf-16", "utf-16-le", "utf-16-be", "utf-32", "utf-32-le", "utf-32-be"}
+DETECT_CANDIDATES = (
+    ("cp950", "utf8_failed_cp950_valid"),
+    ("big5", "utf8_failed_big5_valid"),
+    ("shift_jis", "utf8_failed_shift_jis_valid"),
+    ("cp932", "utf8_failed_cp932_valid"),
+    ("euc_jp", "utf8_failed_euc_jp_valid"),
+    ("euc_kr", "utf8_failed_euc_kr_valid"),
+    ("gbk", "utf8_failed_gbk_valid"),
+    ("gb18030", "utf8_failed_gb18030_valid"),
+    ("cp1252", "utf8_failed_cp1252_valid"),
+    ("latin_1", "utf8_failed_latin1_valid"),
+)
+
 
 def list_windows_drives() -> list[dict[str, Any]]:
     drives: list[dict[str, Any]] = []
@@ -119,9 +135,38 @@ def normalize_encoding(name: str) -> str:
         "utf-8-sig": "utf-8-sig",
         "utf16": "utf-16",
         "utf-16": "utf-16",
+        "utf16-le": "utf-16-le",
+        "utf-16-le": "utf-16-le",
+        "utf16-be": "utf-16-be",
+        "utf-16-be": "utf-16-be",
+        "utf32": "utf-32",
+        "utf-32": "utf-32",
+        "utf32-le": "utf-32-le",
+        "utf-32-le": "utf-32-le",
+        "utf32-be": "utf-32-be",
+        "utf-32-be": "utf-32-be",
+        "gb18030": "gb18030",
+        "gbk": "gbk",
+        "shift-jis": "shift_jis",
+        "shift_jis": "shift_jis",
+        "sjis": "shift_jis",
+        "cp932": "cp932",
+        "euc-jp": "euc_jp",
+        "euc_jp": "euc_jp",
+        "euc-kr": "euc_kr",
+        "euc_kr": "euc_kr",
+        "cp1252": "cp1252",
+        "windows-1252": "cp1252",
+        "latin1": "latin_1",
+        "latin-1": "latin_1",
+        "iso-8859-1": "latin_1",
         "auto": "auto",
     }
     return aliases.get(key, key)
+
+
+def is_convertible_encoding(encoding: str, confidence: str) -> bool:
+    return encoding not in UTF8_ENCODINGS | NON_CONVERTIBLE_ENCODINGS and confidence != "low"
 
 
 def read_bytes(path: Path, max_bytes: int | None = None) -> bytes:
@@ -160,24 +205,70 @@ def decode_strict(data: bytes, encoding: str) -> str | None:
         return None
 
 
+def detect_utf16_without_bom(data: bytes) -> tuple[str, str] | None:
+    if len(data) < 4 or len(data) % 2:
+        return None
+
+    even = data[0::2]
+    odd = data[1::2]
+    even_null_ratio = even.count(0) / len(even)
+    odd_null_ratio = odd.count(0) / len(odd)
+    if odd_null_ratio > 0.35 and even_null_ratio < 0.10 and decode_strict(data, "utf-16-le") is not None:
+        return "utf-16-le", "utf16le_null_pattern"
+    if even_null_ratio > 0.35 and odd_null_ratio < 0.10 and decode_strict(data, "utf-16-be") is not None:
+        return "utf-16-be", "utf16be_null_pattern"
+    return None
+
+
+def looks_like_text(text: str) -> bool:
+    if not text:
+        return True
+    sample = text[:4096]
+    control = sum(1 for char in sample if ord(char) < 32 and char not in "\t\r\n")
+    return control / len(sample) <= 0.02
+
+
+def detect_utf16_by_text_shape(data: bytes) -> tuple[str, str] | None:
+    if len(data) < 4 or len(data) % 2 or b"\x00" not in data[:4096]:
+        return None
+    for encoding in ("utf-16-le", "utf-16-be"):
+        text = decode_strict(data, encoding)
+        if text is not None and looks_like_text(text.removeprefix("\ufeff")):
+            return encoding, f"{encoding.replace('-', '')}_text_shape"
+    return None
+
+
 def detect_encoding(path: Path, data: bytes) -> tuple[str, str, str, str]:
+    if data.startswith(b"\xff\xfe\x00\x00"):
+        return "utf-32-le", "certain", "bom", "UTF-32 LE BOM"
+    if data.startswith(b"\x00\x00\xfe\xff"):
+        return "utf-32-be", "certain", "bom", "UTF-32 BE BOM"
     if data.startswith(b"\xef\xbb\xbf"):
         return "utf-8-sig", "certain", "bom", "UTF-8 BOM"
     if data.startswith(b"\xff\xfe"):
         return "utf-16-le", "certain", "bom", "UTF-16 LE BOM"
     if data.startswith(b"\xfe\xff"):
         return "utf-16-be", "certain", "bom", "UTF-16 BE BOM"
+    utf16 = detect_utf16_without_bom(data)
+    if utf16 is not None:
+        encoding, note = utf16
+        return encoding, "medium", note, "none"
+    utf16 = detect_utf16_by_text_shape(data)
+    if utf16 is not None:
+        encoding, note = utf16
+        return encoding, "medium", note, "none"
     if is_probably_binary(data):
         return "binary", "certain", "binary_signature", "none"
 
     if decode_strict(data, "utf-8") is not None:
         return "utf-8", "high", "valid_utf8", "none"
 
-    cp950_text = decode_strict(data, "cp950")
-    if cp950_text is not None:
-        if "\ufffd" in cp950_text:
-            return "cp950", "low", "cp950_contains_replacement", "none"
-        return "cp950", "medium", "utf8_failed_cp950_valid", "none"
+    for candidate, note in DETECT_CANDIDATES:
+        text = decode_strict(data, candidate)
+        if text is not None:
+            if "\ufffd" in text:
+                return candidate, "low", f"{candidate}_contains_replacement", "none"
+            return candidate, "medium", note, "none"
 
     return "unknown", "low", "no_strict_decoder_matched", "none"
 
@@ -187,7 +278,7 @@ def detect_file(root: Path, path: Path) -> FileReport:
     data = read_bytes(path)
     encoding, confidence, note, bom = detect_encoding(path, data)
     risk = "low"
-    selectable = encoding in {"cp950", "utf-8", "utf-8-sig"} and confidence != "low"
+    selectable = is_convertible_encoding(encoding, confidence)
     if encoding in {"unknown", "binary"}:
         risk = "high"
         selectable = False
@@ -300,7 +391,10 @@ def decode_for_preview(path: Path, encoding: str) -> tuple[str, str]:
         actual, _, _, _ = detect_encoding(path, data)
     if actual in {"binary", "unknown"}:
         raise ValueError(f"Cannot decode {actual} file.")
-    return data.decode(actual, errors="strict"), actual
+    text = data.decode(actual, errors="strict")
+    if actual in UTF_ENCODINGS_WITH_BOM_CHAR:
+        text = text.removeprefix("\ufeff")
+    return text, actual
 
 
 def preview_conversion(payload: dict[str, Any]) -> dict[str, Any]:
@@ -377,6 +471,7 @@ def convert_files(payload: dict[str, Any]) -> dict[str, Any]:
             if "\ufffd" in text:
                 raise ValueError("Decoded text contains replacement characters.")
             converted = text.encode(to_encoding, errors="strict")
+            converted.decode(to_encoding, errors="strict")
 
             if mode == "out":
                 destination = target_path_for(source, root, output_root)
@@ -438,6 +533,8 @@ class AppHandler(BaseHTTPRequestHandler):
         data = path.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mime)
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
