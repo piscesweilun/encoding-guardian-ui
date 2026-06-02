@@ -4,6 +4,12 @@ Local web UI for scanning text file encodings, previewing conversions, and conve
 
 ## Run
 
+Create a desktop shortcut:
+
+```powershell
+.\install-shortcut.ps1
+```
+
 Double-click:
 
 ```text
@@ -26,6 +32,12 @@ Then open:
 
 ```text
 http://127.0.0.1:8000/
+```
+
+Remove the desktop shortcut:
+
+```powershell
+.\uninstall-shortcut.ps1
 ```
 
 ## Features
