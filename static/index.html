@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Encoding Guardian</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="mark">E</div>
+          <div>
+            <h1>Encoding Guardian</h1>
+            <p>Big5 / UTF-8 批次檢查與轉檔</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h2>掃描設定</h2>
+          <label>
+            目錄路徑
+            <div class="path-picker">
+              <input id="rootInput" value="D:\Git" />
+              <button id="chooseRootButton" type="button">選擇</button>
+            </div>
+          </label>
+          <label>
+            Include
+            <input id="includeInput" value="*.c,*.cpp,*.h,*.hpp,*.cs,*.vb,*.js,*.ts,*.html,*.css,*.sql,*.txt,*.md,*.json,*.xml" />
+          </label>
+          <label>
+            Exclude
+            <input id="excludeInput" value=".git,node_modules,dist,build,bin,obj,vendor" />
+          </label>
+          <div class="row">
+            <label>
+              最大 MB
+              <input id="maxSizeInput" type="number" min="1" max="100" value="5" />
+            </label>
+            <label class="check">
+              <input id="recursiveInput" type="checkbox" checked />
+              遞迴
+            </label>
+          </div>
+          <button id="scanButton" class="primary">掃描</button>
+        </section>
+
+        <section class="panel">
+          <h2>轉換設定</h2>
+          <label>
+            來源編碼
+            <select id="fromEncoding">
+              <option value="auto">自動</option>
+              <option value="cp950">CP950 / Big5</option>
+              <option value="utf-8">UTF-8</option>
+            </select>
+          </label>
+          <label>
+            目標編碼
+            <select id="toEncoding">
+              <option value="utf-8">UTF-8</option>
+              <option value="utf-8-sig">UTF-8 BOM</option>
+              <option value="cp950">CP950 / Big5</option>
+            </select>
+          </label>
+          <label>
+            模式
+            <select id="convertMode">
+              <option value="out">輸出到新目錄</option>
+              <option value="in-place">原地轉換並備份</option>
+            </select>
+          </label>
+          <label>
+            輸出目錄
+            <input id="outputRoot" value="D:\Git\encoding-converted" />
+          </label>
+          <label>
+            備份目錄
+            <input id="backupRoot" value="D:\Git\encoding-backup" />
+          </label>
+          <button id="convertButton" class="danger">轉換勾選檔案</button>
+        </section>
+      </aside>
+
+      <main class="content">
+        <section class="toolbar">
+          <div class="stats" id="stats"></div>
+          <div class="filters">
+            <button data-filter="all" class="active">全部</button>
+            <button data-filter="big5">Big5</button>
+            <button data-filter="non-utf8">非 UTF-8</button>
+            <button data-filter="unknown">Unknown</button>
+            <button data-filter="low-confidence">低信心</button>
+            <button data-filter="convertible">可轉換</button>
+          </div>
+        </section>
+
+        <section class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><input id="selectAll" type="checkbox" title="勾選目前篩選結果中可安全轉換的檔案" /></th>
+                <th>檔案</th>
+                <th>編碼</th>
+                <th>信心</th>
+                <th>換行</th>
+                <th>大小</th>
+                <th>風險</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="fileRows">
+              <tr>
+                <td colspan="8" class="empty">尚未掃描</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="preview">
+          <div class="preview-head">
+            <h2>預覽</h2>
+            <span id="previewMeta"></span>
+          </div>
+          <pre id="previewText">點選檔案列的「預覽」查看轉碼前後風險。</pre>
+        </section>
+
+        <section class="log">
+          <div class="preview-head">
+            <h2>結果</h2>
+            <span id="reportPath"></span>
+          </div>
+          <pre id="logText"></pre>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="directoryDialog">
+      <div class="dialog-head">
+        <h2>選擇目錄</h2>
+        <button id="closeDirectoryDialog" type="button">關閉</button>
+      </div>
+      <div class="dialog-path">
+        <button id="driveListButton" type="button">磁碟機</button>
+        <button id="parentDirectoryButton" type="button">上一層</button>
+        <span id="currentDirectoryText"></span>
+      </div>
+      <div id="directoryList" class="directory-list"></div>
+      <div class="dialog-actions">
+        <button id="applyDirectoryButton" class="primary" type="button">使用此目錄</button>
+      </div>
+    </dialog>
+    <script src="/app.js"></script>
+  </body>
+</html>
