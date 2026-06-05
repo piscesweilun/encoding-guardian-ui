@@ -16,6 +16,12 @@ Double-click:
 run.bat
 ```
 
+On macOS, double-click:
+
+```text
+run.command
+```
+
 Or from PowerShell:
 
 ```powershell
