@@ -25,6 +25,14 @@ function isTargetDifferent(file) {
   return file.encoding !== toEncoding;
 }
 
+function isAutoDecodable(file) {
+  return !["binary", "unknown"].includes(file.encoding) && file.confidence !== "low";
+}
+
+function needsUtf8Bom(file) {
+  return file.encoding !== "utf-8-sig" && file.encoding !== "binary";
+}
+
 function getFromEncoding() {
   const selected = el("fromEncoding").value;
   if (selected !== "custom") return selected;
@@ -32,7 +40,8 @@ function getFromEncoding() {
 }
 
 function canSelectFile(file) {
-  return isTargetDifferent(file);
+  if (!isTargetDifferent(file) || file.encoding === "binary") return false;
+  return getFromEncoding() !== "auto" || isAutoDecodable(file);
 }
 
 function matchesFilter(file) {
@@ -41,6 +50,8 @@ function matchesFilter(file) {
       return file.encoding === "cp950";
     case "non-utf8":
       return isNonUtf8(file);
+    case "needs-bom":
+      return needsUtf8Bom(file);
     case "unknown":
       return file.encoding === "unknown";
     case "low-confidence":
@@ -106,7 +117,14 @@ function renderRows() {
         <tr>
           <td><input class="file-check" type="checkbox" data-id="${id}" ${file.selected ? "checked" : ""} ${canSelect ? "" : "disabled"} /></td>
           <td class="path" title="${file.path}">${file.relative_path}</td>
-          <td><span class="tag">${file.encoding}</span></td>
+          <td>
+            <span class="tag">${file.encoding}</span>
+            ${
+              file.converted
+                ? `<div class="muted">輸出：${file.converted.encoding}${file.converted.bomAfter === "UTF-8 BOM" ? " / BOM" : ""}</div>`
+                : ""
+            }
+          </td>
           <td>${file.confidence}</td>
           <td>${file.line_ending}</td>
           <td>${formatSize(file.size)}</td>
@@ -120,6 +138,7 @@ function renderRows() {
 
 function log(message) {
   el("logText").textContent = message;
+  el("logText").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 async function browseDirectories(path = "") {
@@ -232,15 +251,19 @@ async function convertSelected() {
     return;
   }
   const mode = el("convertMode").value;
-  const modeText =
-    mode === "in-place"
-      ? `原地轉換並備份\n備份目錄：${el("backupRoot").value}`
-      : `輸出到新目錄，原始檔不會變\n輸出目錄：${el("outputRoot").value}`;
-  const summary = `即將轉換 ${selected.length} 個檔案\n來源：${fromEncoding}\n目標：${el("toEncoding").value}\n模式：${modeText}`;
-  if (!confirm(summary)) return;
 
   el("convertButton").disabled = true;
   el("convertButton").textContent = "轉換中...";
+  log(
+    [
+      `準備轉換 ${selected.length} 個檔案...`,
+      `來源：${fromEncoding}`,
+      `目標：${el("toEncoding").value}`,
+      mode === "in-place"
+        ? `模式：原地轉換並備份，備份目錄：${el("backupRoot").value}`
+        : `模式：輸出到新目錄，原始檔不會變，輸出目錄：${el("outputRoot").value}`,
+    ].join("\n")
+  );
   try {
     const data = await postJson("/api/convert", {
       root: state.root,
@@ -251,6 +274,34 @@ async function convertSelected() {
       outputRoot: el("outputRoot").value,
       backupRoot: el("backupRoot").value,
     });
+    const successful = new Map(
+      data.results.filter((item) => item.status === "success").map((item) => [item.path, item])
+    );
+    state.files.forEach((file) => {
+      const result = successful.get(file.path);
+      if (!result) return;
+      if (mode === "in-place") {
+        file.encoding = result.to;
+        file.bom = result.bomAfter;
+        file.size = result.sizeAfter;
+        file.converted = null;
+      } else {
+        file.converted = {
+          encoding: result.to,
+          bomAfter: result.bomAfter,
+          destination: result.destination,
+          sizeAfter: result.sizeAfter,
+        };
+      }
+      file.selected = canSelectFile(file);
+    });
+    if (mode === "in-place") {
+      renderStats(state.files.reduce((counts, file) => {
+        counts[file.encoding] = (counts[file.encoding] || 0) + 1;
+        return counts;
+      }, {}));
+    }
+    renderRows();
     log(
       [
         `轉換完成：成功 ${data.success}，失敗 ${data.failed}`,
@@ -259,7 +310,7 @@ async function convertSelected() {
         "",
         ...data.results.map((item) =>
           item.status === "success"
-            ? `OK  ${item.path} -> ${item.destination}`
+            ? `OK  ${item.path} -> ${item.destination} (${formatSize(item.sizeBefore)} -> ${formatSize(item.sizeAfter)}, BOM: ${item.bomAfter === "UTF-8 BOM" ? "是" : "否"})`
             : `ERR ${item.path}: ${item.error}`
         ),
       ].join("\n")
@@ -320,17 +371,25 @@ function refreshSourceEncodingControls() {
 el("fromEncoding").addEventListener("change", refreshSourceEncodingControls);
 el("customFromEncoding").addEventListener("input", refreshSourceEncodingControls);
 el("toEncoding").addEventListener("change", () => {
+  if (el("toEncoding").value === "utf-8-sig") {
+    setFilter("needs-bom");
+  }
   state.files.forEach((file) => {
     file.selected = canSelectFile(file);
   });
   renderRows();
 });
 
+function setFilter(filter) {
+  document.querySelectorAll(".filters button").forEach((item) => {
+    item.classList.toggle("active", item.dataset.filter === filter);
+  });
+  state.filter = filter;
+}
+
 document.querySelectorAll(".filters button").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".filters button").forEach((item) => item.classList.remove("active"));
-    button.classList.add("active");
-    state.filter = button.dataset.filter;
+    setFilter(button.dataset.filter);
     renderRows();
   });
 });

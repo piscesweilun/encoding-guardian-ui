@@ -486,6 +486,8 @@ def convert_files(payload: dict[str, Any]) -> dict[str, Any]:
                 source.write_bytes(converted)
                 destination = source
 
+            written = read_bytes(destination, max_bytes=4)
+            bom_after = "UTF-8 BOM" if written.startswith(b"\xef\xbb\xbf") else "none"
             results.append(
                 {
                     "path": str(source),
@@ -498,6 +500,7 @@ def convert_files(payload: dict[str, Any]) -> dict[str, Any]:
                     "sha256After": sha256_bytes(converted),
                     "sizeBefore": len(original),
                     "sizeAfter": len(converted),
+                    "bomAfter": bom_after,
                 }
             )
         except Exception as exc:
@@ -580,7 +583,12 @@ def main() -> None:
 
     server = ThreadingHTTPServer((args.host, args.port), AppHandler)
     print(f"Encoding Inspector UI running at http://{args.host}:{args.port}/")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":
